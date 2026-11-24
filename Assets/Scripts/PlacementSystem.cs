@@ -22,6 +22,10 @@ public class PlacementSystem : MonoBehaviour
     [SerializeField]
     private PlayerController player;
 
+    [Tooltip("The flashlight. Placing a tile costs energy from it. Leave empty for free placing.")]
+    [SerializeField]
+    private FlashlightEnergy energy;
+
     [Header("Card river layout (screen pixels)")]
     [SerializeField] private float cardWidth = 110f;
     [SerializeField] private float cardHeight = 150f;
@@ -72,6 +76,11 @@ public class PlacementSystem : MonoBehaviour
 
     // Fades every card shape drawn by FillRect (used while a card is falling away).
     private static float cardAlpha = 1f;
+
+    void Awake()
+    {
+        if (energy == null) energy = FindObjectOfType<FlashlightEnergy>();
+    }
 
     void OnEnable()
     {
@@ -144,15 +153,23 @@ public class PlacementSystem : MonoBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (grid.IsOccupied(cell))
+            if (grid.IsOccupied(cell) || cell == grid.startCell || cell == grid.GoalCell)
             {
-                // Clicking an existing tile = walk there.
+                // Clicking an existing tile (or the start / goal) = walk there.
                 if (player != null) player.TryMoveTo(cell);
             }
-            else if (tile != null && grid.TryPlace(cell, tile, rotationSteps))
+            else if (tile != null)
             {
-                SnapshotHand(selectedSlot); // so the unused cards can freeze away
-                deck.ReplaceSlot(selectedSlot);
+                if (energy != null && !energy.CanAfford(tile))
+                {
+                    energy.NotifyNotEnough(); // the flashlight is too low to light a new tile
+                }
+                else if (grid.TryPlace(cell, tile, rotationSteps))
+                {
+                    if (energy != null) energy.Spend(tile);
+                    SnapshotHand(selectedSlot); // so the unused cards can freeze away
+                    deck.ReplaceSlot(selectedSlot);
+                }
             }
         }
 
@@ -196,7 +213,9 @@ public class PlacementSystem : MonoBehaviour
         UpdateOpeningMarkers(tile, cell, show);
         if (!show) return;
 
-        Color tint = grid.CanPlace(cell, tile, rotationSteps) ? ghostValidColor : ghostInvalidColor;
+        // Red if it doesn't connect, or if the flashlight doesn't have the energy for it.
+        bool affordable = energy == null || energy.CanAfford(tile);
+        Color tint = grid.CanPlace(cell, tile, rotationSteps) && affordable ? ghostValidColor : ghostInvalidColor;
         foreach (Material m in ghostMaterials) m.color = tint;
 
         ghost.transform.position = grid.PositionFor(tile.prefab, cell, rotationSteps + tile.modelRotationOffset) + Vector3.up * ghostLift;

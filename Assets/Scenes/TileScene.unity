@@ -154,6 +154,7 @@ MonoBehaviour:
   player: {fileID: 1185100169}
   grid: {fileID: 487136168}
   disasters:
+  - {fileID: 0}
   - {fileID: 11400000, guid: bc7142864e38a8a49a7f44272ea23926, type: 2}
   countEveryTileStep: 1
   showHud: 1
@@ -467,6 +468,7 @@ GameObject:
   - component: {fileID: 963194228}
   - component: {fileID: 963194227}
   - component: {fileID: 963194226}
+  - component: {fileID: 963194229}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -540,6 +542,26 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+--- !u!114 &963194229
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 963194225}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3d503bba877a34443a9f195294d16777, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 1185100169}
+  distanceBehind: 5
+  height: 4
+  lookAtHeight: 0.5
+  followSmoothTime: 0.35
+  turnSpeed: 3
+  returnToOverview: 1
+  returnDelay: 0.8
 --- !u!1 &983431792
 GameObject:
   m_ObjectHideFlags: 0
@@ -589,6 +611,7 @@ MonoBehaviour:
   grid: {fileID: 487136168}
   deck: {fileID: 2058655595}
   player: {fileID: 1185100169}
+  energy: {fileID: 1572714469}
   cardWidth: 110
   cardHeight: 150
   cardGap: 11
@@ -889,6 +912,55 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 7
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1572714468
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1572714470}
+  - component: {fileID: 1572714469}
+  m_Layer: 0
+  m_Name: Flashlight Energy
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1572714469
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1572714468}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 33ffb882c5892354d8509faf3ab2b5db, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 1185100169}
+  grid: {fileID: 487136168}
+  maxEnergy: 10
+  costPerTile: 1
+  showHud: 1
+--- !u!4 &1572714470
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1572714468}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 10
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2058655594
 GameObject:

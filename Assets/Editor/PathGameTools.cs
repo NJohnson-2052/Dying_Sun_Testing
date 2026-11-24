@@ -367,6 +367,71 @@ public static class PathGameTools
                   "Make more with right-click > Create > Path Game > Disaster, then add them to the Disasters object's list.");
     }
 
+    // One click: adds the flashlight energy and the chase camera, and wires them up.
+    // Safe to run again: it reuses what already exists.
+    [MenuItem("Path Game/Add Energy And Chase Camera To Scene")]
+    static void AddEnergyAndChaseCamera()
+    {
+        PlayerController player = Object.FindObjectOfType<PlayerController>();
+        GridManager grid = Object.FindObjectOfType<GridManager>();
+        PlacementSystem placement = Object.FindObjectOfType<PlacementSystem>();
+        Camera cam = Camera.main;
+
+        if (player == null)
+        {
+            Debug.LogWarning("Path Game: no Player (PlayerController) found in the open scene.");
+            return;
+        }
+
+        // 1. The flashlight energy object.
+        FlashlightEnergy energy = Object.FindObjectOfType<FlashlightEnergy>();
+        if (energy == null)
+        {
+            GameObject go = new GameObject("Flashlight Energy");
+            Undo.RegisterCreatedObjectUndo(go, "Add flashlight energy");
+            energy = go.AddComponent<FlashlightEnergy>();
+        }
+
+        var energySO = new SerializedObject(energy);
+        energySO.FindProperty("player").objectReferenceValue = player;
+        energySO.FindProperty("grid").objectReferenceValue = grid;
+        energySO.ApplyModifiedProperties();
+        EditorSceneManager.MarkSceneDirty(energy.gameObject.scene);
+
+        // 2. Tell the placement system about it.
+        if (placement != null)
+        {
+            var placementSO = new SerializedObject(placement);
+            SerializedProperty energyProp = placementSO.FindProperty("energy");
+            if (energyProp != null) energyProp.objectReferenceValue = energy;
+            placementSO.ApplyModifiedProperties();
+            EditorSceneManager.MarkSceneDirty(placement.gameObject.scene);
+        }
+        else
+        {
+            Debug.LogWarning("Path Game: no PlacementSystem found, so tiles won't cost energy yet.");
+        }
+
+        // 3. The chase camera goes on the Main Camera (the one tagged MainCamera).
+        if (cam == null)
+        {
+            Debug.LogWarning("Path Game: no camera tagged MainCamera found, so the chase camera was not added.");
+        }
+        else
+        {
+            CameraFollow follow = cam.GetComponent<CameraFollow>();
+            if (follow == null) follow = Undo.AddComponent<CameraFollow>(cam.gameObject);
+
+            var followSO = new SerializedObject(follow);
+            followSO.FindProperty("player").objectReferenceValue = player;
+            followSO.ApplyModifiedProperties();
+            EditorSceneManager.MarkSceneDirty(cam.gameObject.scene);
+        }
+
+        Selection.activeObject = energy.gameObject;
+        Debug.Log("Path Game: energy and chase camera ready. Tune them on the Flashlight Energy object and the Main Camera.");
+    }
+
     static void EnsureFolder(string parent, string name)
     {
         if (!AssetDatabase.IsValidFolder(parent + "/" + name)) AssetDatabase.CreateFolder(parent, name);

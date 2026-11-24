@@ -91,7 +91,8 @@ public class PlayerController : MonoBehaviour
         foreach (Vector2Int cell in path)
         {
             // Stop if the tile ahead was removed while walking.
-            if (grid.GetTile(cell) == null) break;
+            // (The start cell never has a placed tile, so it is always allowed.)
+            if (cell != grid.startCell && grid.GetTile(cell) == null) break;
 
             Vector3 start = transform.position;
             Vector3 destination = CellToStandPoint(cell);
