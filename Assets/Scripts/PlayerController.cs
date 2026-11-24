@@ -29,6 +29,14 @@ public class PlayerController : MonoBehaviour
     public bool HasWon { get; private set; }
     public event Action ReachedGoal;
 
+    // Used by the disaster system to count turns.
+    // Fired after each tile the player steps onto (not the goal tile, which ends the game).
+    public event Action StepTaken;
+    // Fired when a walk ends, as long as the player moved at least one tile.
+    public event Action MoveFinished;
+    // Fired when Restart puts the player back at the start.
+    public event Action WasReset;
+
     private Coroutine moveRoutine;
     private readonly Dictionary<ResourceType, int> resources = new Dictionary<ResourceType, int>();
     private readonly HashSet<Vector2Int> collectedCells = new HashSet<Vector2Int>();
@@ -50,6 +58,20 @@ public class PlayerController : MonoBehaviour
 
     public int GetResource(ResourceType type) => resources.TryGetValue(type, out int n) ? n : 0;
 
+    // Takes resources away (a disaster, a cost...). Never goes below zero.
+    // Returns how many were actually taken, which can be less than asked if the player had fewer.
+    public int RemoveResource(ResourceType type, int amount)
+    {
+        int have = GetResource(type);
+        int taken = Mathf.Clamp(amount, 0, have);
+        if (taken > 0)
+        {
+            resources[type] = have - taken;
+            ResourcesChanged?.Invoke();
+        }
+        return taken;
+    }
+
     // Called by PlacementSystem when the player clicks a placed tile.
     public bool TryMoveTo(Vector2Int target)
     {
@@ -64,6 +86,8 @@ public class PlayerController : MonoBehaviour
 
     IEnumerator WalkPath(List<Vector2Int> path)
     {
+        int steps = 0;
+
         foreach (Vector2Int cell in path)
         {
             // Stop if the tile ahead was removed while walking.
@@ -97,6 +121,7 @@ public class PlayerController : MonoBehaviour
             transform.position = destination;
 
             CurrentCell = cell;
+            steps++;
             Collect(cell);
 
             // Stepping onto the goal ends the walk and wins the demo.
@@ -106,8 +131,13 @@ public class PlayerController : MonoBehaviour
                 ReachedGoal?.Invoke();
                 break;
             }
+
+            StepTaken?.Invoke();
         }
         moveRoutine = null;
+
+        // The walk is over. This counts as one turn.
+        if (steps > 0) MoveFinished?.Invoke();
     }
 
     void Collect(Vector2Int cell)
@@ -135,6 +165,7 @@ public class PlayerController : MonoBehaviour
         CurrentCell = grid.startCell;
         transform.position = CellToStandPoint(CurrentCell);
         ResourcesChanged?.Invoke();
+        WasReset?.Invoke();
     }
 
     // The grid decides what each cell opens to (the start and goal cells act like crossroads).

@@ -75,6 +75,7 @@ public static class PathGameTools
         {
             Undo.RecordObject(deck, "Assign tile pool");
             deck.pool = created.ToArray();
+            deck.recipe = TileDeck.BuildDefaultRecipe(created); // the default 80-card deck, editable in the Inspector
             EditorUtility.SetDirty(deck);
             EditorSceneManager.MarkSceneDirty(deck.gameObject.scene);
         }
@@ -277,6 +278,98 @@ public static class PathGameTools
 
         if (Mathf.Abs(pickW - gridW) > step * 3f || Mathf.Abs(pickH - gridH) > step * 3f)
             Debug.LogWarning("Path Game: the recess and the grid aren't the same size. Adjust the Grid's Width/Height (cell size is set by your tile).");
+    }
+
+    // Fills the TileDeck's recipe list with the default 80-card deck so you can edit the numbers in the Inspector.
+    // Run it again any time to put the recipe back to the defaults.
+    [MenuItem("Path Game/Reset Deck Recipe To Default")]
+    static void ResetDeckRecipe()
+    {
+        TileDeck deck = Object.FindObjectOfType<TileDeck>();
+        if (deck == null || deck.pool == null || deck.pool.Length == 0)
+        {
+            Debug.LogWarning("Path Game: the TileDeck needs its Pool filled first (run Path Game > Create 12 Tile Definitions).");
+            return;
+        }
+
+        Undo.RecordObject(deck, "Reset deck recipe");
+        deck.recipe = TileDeck.BuildDefaultRecipe(deck.pool);
+        EditorUtility.SetDirty(deck);
+        EditorSceneManager.MarkSceneDirty(deck.gameObject.scene);
+
+        int total = 0;
+        foreach (DeckEntry entry in deck.recipe) total += entry.copies;
+        Debug.Log("Path Game: deck recipe reset to the default (" + total + " cards). Select the TileDeck to edit the copies of each tile.");
+    }
+
+    // One click: creates the Blizzard disaster (every 4 turns), adds a Disaster Manager to the scene,
+    // and wires the player, the grid and the Blizzard into it.
+    // Safe to run again: it reuses what already exists and only adds what's missing.
+    [MenuItem("Path Game/Add Disaster System To Scene")]
+    static void AddDisasterSystem()
+    {
+        PlayerController player = Object.FindObjectOfType<PlayerController>();
+        GridManager grid = Object.FindObjectOfType<GridManager>();
+        if (player == null)
+        {
+            Debug.LogWarning("Path Game: no Player (PlayerController) found in the open scene.");
+            return;
+        }
+
+        // 1. The Blizzard asset. Only created once, so your tuning is never overwritten.
+        EnsureFolder("Assets", "Data");
+        EnsureFolder("Assets/Data", "Disasters");
+        const string path = "Assets/Data/Disasters/Blizzard.asset";
+
+        ResourceLossDisaster blizzard = AssetDatabase.LoadAssetAtPath<ResourceLossDisaster>(path);
+        if (blizzard == null)
+        {
+            blizzard = ScriptableObject.CreateInstance<ResourceLossDisaster>();
+            blizzard.displayName = "Blizzard";
+            blizzard.firstTurn = 4;
+            blizzard.repeatEvery = 4;
+            blizzard.minLoss = 1;
+            blizzard.maxLoss = 2;
+            AssetDatabase.CreateAsset(blizzard, path);
+            AssetDatabase.SaveAssets();
+        }
+
+        // 2. The manager object.
+        DisasterManager manager = Object.FindObjectOfType<DisasterManager>();
+        if (manager == null)
+        {
+            GameObject go = new GameObject("Disasters");
+            Undo.RegisterCreatedObjectUndo(go, "Add disaster system");
+            manager = go.AddComponent<DisasterManager>();
+        }
+
+        // 3. Wire it up (the fields are private, so go through the serialized object).
+        var so = new SerializedObject(manager);
+        so.FindProperty("player").objectReferenceValue = player;
+        so.FindProperty("grid").objectReferenceValue = grid;
+
+        SerializedProperty list = so.FindProperty("disasters");
+        bool alreadyListed = false;
+        for (int i = 0; i < list.arraySize; i++)
+            if (list.GetArrayElementAtIndex(i).objectReferenceValue == blizzard) alreadyListed = true;
+
+        if (!alreadyListed)
+        {
+            list.arraySize++;
+            list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = blizzard;
+        }
+
+        so.ApplyModifiedProperties();
+        EditorSceneManager.MarkSceneDirty(manager.gameObject.scene);
+
+        Selection.activeObject = blizzard; // so you can tune it right away
+        Debug.Log("Path Game: disaster system ready. The Blizzard asset is in Assets/Data/Disasters. " +
+                  "Make more with right-click > Create > Path Game > Disaster, then add them to the Disasters object's list.");
+    }
+
+    static void EnsureFolder(string parent, string name)
+    {
+        if (!AssetDatabase.IsValidFolder(parent + "/" + name)) AssetDatabase.CreateFolder(parent, name);
     }
 
     static GameObject FindPrefab(string name)

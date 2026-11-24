@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 0}
+  m_Name: Blizzard
+  m_EditorClassIdentifier: Assembly-CSharp::ResourceLossDisaster
+  displayName: Blizzard
+  firstTurn: 4
+  repeatEvery: 4
+  visuals:
+    tint: {r: 0.75, g: 0.88, b: 1, a: 0.35}
+    particleColor: {r: 1, g: 1, b: 1, a: 1}
+    particleCount: 220
+    fallSpeed: 260
+    sideDrift: -160
+    sizeRange: {x: 3, y: 9}
+    streaks: 0
+    duration: 3.5
+    cameraShake: 0.15
+  affects: 
+  onlyOneRandomType: 0
+  minLoss: 1
+  maxLoss: 2

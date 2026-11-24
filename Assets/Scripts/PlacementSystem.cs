@@ -55,6 +55,7 @@ public class PlacementSystem : MonoBehaviour
     [SerializeField] private float shuffleDuration = 0.9f;
 
     private float shuffleStart = -100f;
+    private float reshuffleNoticeUntil = -1f; // shows "discard pile shuffled back in" until this time
     private bool IsShuffling => Time.time >= shuffleStart && Time.time - shuffleStart < shuffleDuration;
 
     [Header("Freeze-away animation (the old cards)")]
@@ -76,12 +77,14 @@ public class PlacementSystem : MonoBehaviour
     {
         if (player != null) player.ReachedGoal += OnReachedGoal;
         if (deck != null) deck.Shuffled += StartShuffle;
+        if (deck != null) deck.Reshuffled += OnDeckReshuffled;
     }
 
     void OnDisable()
     {
         if (player != null) player.ReachedGoal -= OnReachedGoal;
         if (deck != null) deck.Shuffled -= StartShuffle;
+        if (deck != null) deck.Reshuffled -= OnDeckReshuffled;
     }
 
     void StartShuffle()
@@ -90,6 +93,12 @@ public class PlacementSystem : MonoBehaviour
         float freezePart = outgoingHand != null ? freezeDuration : 0f;
         freezeStart = Time.time;
         shuffleStart = Time.time + freezePart;
+    }
+
+    // The draw pile ran out and the discard pile was shuffled back in.
+    void OnDeckReshuffled()
+    {
+        reshuffleNoticeUntil = Time.unscaledTime + 2f;
     }
 
     // Remembers the cards that are about to disappear so they can freeze away.
@@ -337,7 +346,7 @@ public class PlacementSystem : MonoBehaviour
         Vector2 m = Input.mousePosition;
         m.y = Screen.height - m.y; // Input origin is bottom-left, GUI origin is top-left
         Rect r = RiverRect();
-        r.xMin -= cardGap; r.xMax += cardGap; r.yMin -= cardGap;
+        r.xMin -= 150f; r.xMax += 150f; r.yMin -= cardGap; // also covers the draw and discard piles beside the cards
         // Also covers the Restart button in the top-right corner.
         return r.Contains(m) || new Rect(Screen.width - 120, 0, 120, 48).Contains(m);
     }
@@ -532,8 +541,55 @@ public class PlacementSystem : MonoBehaviour
 
         GUI.Label(new Rect(river.x, river.y - 24, 400, 22), "Rotation: " + rotationSteps * 90 + "°  (scroll wheel or R)");
 
+        DrawPiles(river);
         DrawStatus();
         DrawCalibrationHelp();
+    }
+
+    // ---------- Draw pile and discard pile ----------
+
+    // The draw pile sits to the left of the cards and the discard pile to the right,
+    // drawn as small stacks of card backs that get taller the more cards they hold.
+    void DrawPiles(Rect river)
+    {
+        const float w = 64f;
+        const float h = 88f;
+        float y = river.y + (river.height - h) * 0.5f;
+
+        DrawPile(new Rect(river.x - w - 56f, y, w, h), deck.DrawCount, "Draw pile");
+        DrawPile(new Rect(river.xMax + 56f, y, w, h), deck.DiscardCount, "Discard");
+
+        if (Time.unscaledTime < reshuffleNoticeUntil)
+        {
+            var notice = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 18,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
+            notice.normal.textColor = new Color(0.7f, 0.85f, 1f);
+            GUI.Label(new Rect(river.x - 100f, river.y - 56f, river.width + 200f, 26f),
+                      "Discard pile shuffled back into the deck", notice);
+        }
+    }
+
+    void DrawPile(Rect top, int count, string label)
+    {
+        int layers = count <= 0 ? 0 : Mathf.Clamp(Mathf.CeilToInt(count / 10f), 1, 6);
+
+        if (layers == 0)
+            FillRect(top, new Color(1f, 1f, 1f, 0.08f)); // empty pile
+
+        for (int i = layers - 1; i >= 0; i--)
+        {
+            Rect r = new Rect(top.x - i * 2f, top.y - i * 2f, top.width, top.height);
+            FillRect(new Rect(r.x - 2f, r.y - 2f, r.width + 4f, r.height + 4f), new Color(0.05f, 0.06f, 0.1f, 1f));
+            FillRect(r, new Color(0.25f, 0.3f, 0.45f, 1f));
+            FillRect(new Rect(r.x + 6f, r.y + 6f, r.width - 12f, r.height - 12f), new Color(0.15f, 0.18f, 0.3f, 1f));
+        }
+
+        var style = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontSize = 13 };
+        GUI.Label(new Rect(top.x - 20f, top.yMax + 8f, top.width + 40f, 22f), label + ": " + count, style);
     }
 
     // Restart button (always visible) plus win / stuck messages.
