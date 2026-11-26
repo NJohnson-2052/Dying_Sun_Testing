@@ -12,16 +12,20 @@ public class GoalGlow : MonoBehaviour
     private const float FadeInSeconds = 1.5f;
     private const float HumVolume = 0.12f;       // 0 = silent, 1 = full volume
 
+    // Turn the quiet hum on or off. The domes you have visited glow silently; the last one hums.
+    public bool humEnabled = true;
+
     private Light glow;
     private AudioSource hum;
     private float age;
 
-    public static GoalGlow Create(Vector3 position, float range)
+    public static GoalGlow Create(Vector3 position, float range, bool withHum = true)
     {
         GameObject go = new GameObject("GoalGlow");
         go.transform.position = position;
         GoalGlow g = go.AddComponent<GoalGlow>(); // Awake runs right away
         g.glow.range = range;
+        g.humEnabled = withHum;
         return g;
     }
 
@@ -49,7 +53,7 @@ public class GoalGlow : MonoBehaviour
         float pulse = 0.5f + 0.5f * Mathf.Sin(age * PulsesPerSecond * 2f * Mathf.PI); // 0..1
 
         glow.intensity = Mathf.Lerp(MinIntensity, MaxIntensity, pulse) * fade;
-        hum.volume = HumVolume * fade * (0.7f + 0.3f * pulse); // the hum swells a little with the glow
+        hum.volume = humEnabled ? HumVolume * fade * (0.7f + 0.3f * pulse) : 0f; // the hum swells a little with the glow
     }
 
     // A low note (110 Hz) with two soft overtones. Each frequency fits a whole number of cycles

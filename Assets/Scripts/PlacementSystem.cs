@@ -52,8 +52,6 @@ public class PlacementSystem : MonoBehaviour
     private GameObject openingMarkers;
     private readonly GameObject[] markerArms = new GameObject[4]; // North, East, South, West
 
-    private GoalGlow goalGlow;
-
     [Header("Shuffle animation")]
     [Tooltip("How long the shuffle takes, in seconds. Placing is paused while the cards are being dealt.")]
     [SerializeField] private float shuffleDuration = 0.9f;
@@ -84,14 +82,12 @@ public class PlacementSystem : MonoBehaviour
 
     void OnEnable()
     {
-        if (player != null) player.ReachedGoal += OnReachedGoal;
         if (deck != null) deck.Shuffled += StartShuffle;
         if (deck != null) deck.Reshuffled += OnDeckReshuffled;
     }
 
     void OnDisable()
     {
-        if (player != null) player.ReachedGoal -= OnReachedGoal;
         if (deck != null) deck.Shuffled -= StartShuffle;
         if (deck != null) deck.Reshuffled -= OnDeckReshuffled;
     }
@@ -117,13 +113,6 @@ public class PlacementSystem : MonoBehaviour
         outgoingHand = (TileDefinition[])deck.Hand.Clone();
         if (playedSlot >= 0 && playedSlot < outgoingHand.Length) outgoingHand[playedSlot] = null;
         outgoingRotation = rotationSteps;
-    }
-
-    // The player stepped onto the goal: start the soft red glow and hum.
-    void OnReachedGoal()
-    {
-        if (goalGlow != null) Destroy(goalGlow.gameObject);
-        goalGlow = GoalGlow.Create(grid.CellToWorld(grid.GoalCell) + Vector3.up * 1.5f, grid.cellSize * 4f);
     }
 
     private void Update()
@@ -153,7 +142,7 @@ public class PlacementSystem : MonoBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (grid.IsOccupied(cell) || cell == grid.startCell || cell == grid.GoalCell)
+            if (grid.IsOccupied(cell) || cell == grid.startCell || grid.IsGoal(cell))
             {
                 // Clicking an existing tile (or the start / goal) = walk there.
                 if (player != null) player.TryMoveTo(cell);
@@ -208,7 +197,7 @@ public class PlacementSystem : MonoBehaviour
         if (ghost == null || ghostFor != tile) BuildGhost(tile);
 
         // Show over any free cell: green if the tile can go here, red if it can't.
-        bool show = inBounds && !grid.IsOccupied(cell) && cell != grid.startCell && cell != grid.GoalCell;
+        bool show = inBounds && !grid.IsOccupied(cell) && cell != grid.startCell && !grid.IsGoal(cell);
         ghost.SetActive(show);
         UpdateOpeningMarkers(tile, cell, show);
         if (!show) return;
@@ -617,7 +606,7 @@ public class PlacementSystem : MonoBehaviour
         if (GUI.Button(new Rect(Screen.width - 110, 10, 100, 28), "Restart")) RestartGame();
 
         string message = null;
-        if (player != null && player.HasWon) message = "You reached the goal!";
+        if (player != null && player.HasWon) message = "All " + grid.Goals.Count + " domes reached!";
         else if (deck.NoMovesLeft) message = "No legal placements left. Right-click a tile to remove it, or Restart.";
         if (message == null) return;
 
@@ -633,7 +622,6 @@ public class PlacementSystem : MonoBehaviour
 
     void RestartGame()
     {
-        if (goalGlow != null) Destroy(goalGlow.gameObject);
         if (player != null) player.ResetPlayer();
         grid.ResetBoard();
         SnapshotHand(-1); // the whole old hand freezes away

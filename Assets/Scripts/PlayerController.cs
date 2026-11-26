@@ -26,8 +26,16 @@ public class PlayerController : MonoBehaviour
     public bool IsMoving => moveRoutine != null;
     public event Action ResourcesChanged;
 
+    // You win once every dome has been visited.
     public bool HasWon { get; private set; }
-    public event Action ReachedGoal;
+    public event Action ReachedGoal;          // fired once, when the LAST dome is reached
+
+    // Fired the first time the player steps onto each dome. Passes that dome's cell.
+    public event Action<Vector2Int> GoalVisited;
+
+    private readonly HashSet<Vector2Int> visitedGoals = new HashSet<Vector2Int>();
+    public int GoalsVisited => visitedGoals.Count;
+    public bool HasVisited(Vector2Int cell) => visitedGoals.Contains(cell);
 
     // Used by the disaster system to count turns.
     // Fired after each tile the player steps onto (not the goal tile, which ends the game).
@@ -91,8 +99,8 @@ public class PlayerController : MonoBehaviour
         foreach (Vector2Int cell in path)
         {
             // Stop if the tile ahead was removed while walking.
-            // (The start cell never has a placed tile, so it is always allowed.)
-            if (cell != grid.startCell && grid.GetTile(cell) == null) break;
+            // (The start cell and the domes never have a placed tile, so they are always allowed.)
+            if (cell != grid.startCell && !grid.IsGoal(cell) && grid.GetTile(cell) == null) break;
 
             Vector3 start = transform.position;
             Vector3 destination = CellToStandPoint(cell);
@@ -125,12 +133,21 @@ public class PlayerController : MonoBehaviour
             steps++;
             Collect(cell);
 
-            // Stepping onto the goal ends the walk and wins the demo.
-            if (cell == grid.GoalCell)
+            // Stepping onto a dome marks it as visited. The walk carries on unless that was the last one.
+            if (grid.IsGoal(cell))
             {
-                HasWon = true;
-                ReachedGoal?.Invoke();
-                break;
+                if (visitedGoals.Add(cell))
+                {
+                    grid.MarkGoalVisited(cell); // lets you build out of this dome from now on
+                    GoalVisited?.Invoke(cell);
+                }
+
+                if (visitedGoals.Count >= grid.Goals.Count)
+                {
+                    HasWon = true;
+                    ReachedGoal?.Invoke();
+                    break;
+                }
             }
 
             StepTaken?.Invoke();
@@ -161,6 +178,7 @@ public class PlayerController : MonoBehaviour
 
         resources.Clear();
         collectedCells.Clear();
+        visitedGoals.Clear();
         HasWon = false;
 
         CurrentCell = grid.startCell;

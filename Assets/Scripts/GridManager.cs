@@ -9,7 +9,7 @@ public class PlacedTile
     public GameObject instance;
 }
 
-// Owns the grid data: size, cell <-> world conversion, what is placed where, and the goal.
+// Owns the grid data: size, cell <-> world conversion, what is placed where, and the goals (domes).
 // The grid lies flat on the XZ plane. Put this on an empty GameObject at the grid's corner.
 public class GridManager : MonoBehaviour
 {
@@ -28,12 +28,25 @@ public class GridManager : MonoBehaviour
     [Tooltip("Off: a new tile needs at least one matching connection. On: every neighbouring tile that touches it must also match (stricter).")]
     public bool requireAllNeighborsMatch = false;
 
-    [Header("Goal")]
-    [Tooltip("Optional. Leave empty to get a simple gold disc until you have a real model.")]
+    [Header("Goals (domes)")]
+    [Tooltip("Optional. Leave empty to get a simple gold disc until you have a real model. Used for every dome.")]
     public GameObject goalPrefab;
 
-    [Tooltip("The goal is placed at least this many steps (Manhattan distance) from the start.")]
+    [Tooltip("How many domes the player has to reach to win.")]
+    [Min(1)] public int goalCount = 3;
+
+    [Tooltip("Every dome is at least this many steps (Manhattan distance) from the start.")]
     public int minGoalDistance = 4;
+
+    [Tooltip("Off: you can build out of a dome (on all 4 sides, like the start tile) once you have visited it. On: you can build out of any dome, even one you haven't reached yet.")]
+    public bool buildFromUnvisitedDomes = false;
+
+    [Tooltip("Dome 1 is always close to the start so the player gets an early goal: between these two distances (in steps) from the start.")]
+    public int firstGoalMinDistance = 2;
+    public int firstGoalMaxDistance = 4;
+
+    [Tooltip("Every dome is at least this many steps from every OTHER dome. Bigger = the domes are more spread out, so the player has to explore more of the board. Try 6 for 8x8 and 9 or more for 16x16. If the board is too small for it, it is relaxed automatically.")]
+    public int minGoalSpacing = 6;
 
     [Header("Visuals")]
     [Tooltip("Shown on every empty cell until a tile is placed there (your Tile_Blank prefab).")]
@@ -55,11 +68,19 @@ public class GridManager : MonoBehaviour
     [Header("Debug")]
     public bool drawGizmos = true;
 
-    public Vector2Int GoalCell { get; private set; }
+    // Where the domes are. Filled in when the game starts and again on every Restart.
+    public IReadOnlyList<Vector2Int> Goals => goals;
+    private readonly List<Vector2Int> goals = new List<Vector2Int>();
+
+    public bool IsGoal(Vector2Int c) => goals.Contains(c);
+
+    // Domes the player has stepped on. A visited dome works like the start tile: you can build out of it on all 4 sides.
+    private readonly HashSet<Vector2Int> visitedGoalCells = new HashSet<Vector2Int>();
+    public void MarkGoalVisited(Vector2Int c) { if (IsGoal(c)) visitedGoalCells.Add(c); }
 
     private PlacedTile[,] cells;
     private readonly Dictionary<TileDefinition, int> placedCounts = new Dictionary<TileDefinition, int>();
-    private GameObject goalMarker;
+    private readonly List<GameObject> goalMarkers = new List<GameObject>();
     private GameObject[,] blanks;
 
     // Each prefab is measured once: from its pivot to the center of its BASE (x, z) and to its bottom (y).
@@ -71,7 +92,7 @@ public class GridManager : MonoBehaviour
         MeasureBlank();
         cells = new PlacedTile[width, height];
         SpawnBlanks();
-        PlaceGoal();
+        PlaceGoals();
     }
 
     // ---------- Fitting tiles to the grid ----------
@@ -191,50 +212,101 @@ public class GridManager : MonoBehaviour
         return new Vector2Int(Mathf.FloorToInt(local.x / cellSize), Mathf.FloorToInt(local.z / cellSize));
     }
 
-    // ---------- Goal ----------
+    // ---------- Goals (domes) ----------
 
-    void PlaceGoal()
+    // Picks the dome cells. Each dome has to be far enough from the start AND from every other dome,
+    // so the player has to explore the whole board instead of finding all of them close together.
+    void PlaceGoals()
     {
-        var far = new List<Vector2Int>();
-        var any = new List<Vector2Int>();
+        goals.Clear();
 
+        int wanted = Mathf.Max(1, goalCount);
+        bool done = false;
+        int usedSpacing = -1;
+
+        // Try the spacing you asked for first. If the board is too small for it, relax it one step at a time.
+        for (int spacing = Mathf.Max(0, minGoalSpacing); spacing >= 0 && !done; spacing--)
+        {
+            for (int attempt = 0; attempt < 40 && !done; attempt++)
+                done = TryPickGoals(minGoalDistance, spacing, wanted, true);
+            if (done) usedSpacing = spacing;
+        }
+
+        if (!done)
+        {
+            TryPickGoals(0, 0, wanted, false); // last resort: any free cells at all
+        }
+        else if (usedSpacing < minGoalSpacing)
+        {
+            Debug.LogWarning("Grid: the board is too small for Min Goal Spacing " + minGoalSpacing +
+                             ", so the domes are only " + usedSpacing + " steps apart. Lower Goal Count or Min Goal Spacing, or enlarge the board.");
+        }
+
+        foreach (Vector2Int g in goals)
+        {
+            SetBlankActive(g, false); // the dome replaces the blank underneath
+            SpawnGoalMarker(g);
+        }
+    }
+
+    // One attempt at picking all the domes at random. Returns false if it got stuck.
+    bool TryPickGoals(int minFromStart, int minBetween, int wanted, bool firstNearStart)
+    {
+        goals.Clear();
+
+        var candidates = new List<Vector2Int>();
+        var nearStart = new List<Vector2Int>();
         for (int x = 0; x < width; x++)
         for (int y = 0; y < height; y++)
         {
             var c = new Vector2Int(x, y);
             if (c == startCell) continue;
-            any.Add(c);
-            int distance = Mathf.Abs(c.x - startCell.x) + Mathf.Abs(c.y - startCell.y);
-            if (distance >= minGoalDistance) far.Add(c);
+
+            int fromStart = Manhattan(c, startCell);
+            if (fromStart >= minFromStart) candidates.Add(c);
+            if (fromStart >= firstGoalMinDistance && fromStart <= firstGoalMaxDistance) nearStart.Add(c);
         }
 
-        List<Vector2Int> options = far.Count > 0 ? far : any;
-        if (options.Count == 0) return;
+        // Dome 1 goes close to the start, so the first goal is always within easy reach.
+        if (firstNearStart)
+        {
+            if (nearStart.Count == 0) return false;
+            goals.Add(nearStart[Random.Range(0, nearStart.Count)]);
+        }
 
-        GoalCell = options[Random.Range(0, options.Count)];
-        SetBlankActive(GoalCell, false); // the goal tile replaces the blank underneath
-        SpawnGoalMarker();
+        while (goals.Count < wanted)
+        {
+            // Cells that are far enough from every dome picked so far.
+            List<Vector2Int> valid = candidates.FindAll(c => goals.TrueForAll(g => c != g && Manhattan(c, g) >= minBetween));
+            if (valid.Count == 0) break;
+            goals.Add(valid[Random.Range(0, valid.Count)]);
+        }
+
+        return goals.Count == wanted;
     }
 
-    void SpawnGoalMarker()
+    static int Manhattan(Vector2Int a, Vector2Int b) => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+
+    void SpawnGoalMarker(Vector2Int cell)
     {
         if (goalPrefab != null)
         {
-            goalMarker = Instantiate(goalPrefab, PositionFor(goalPrefab, GoalCell, 0), Quaternion.identity, transform);
+            goalMarkers.Add(Instantiate(goalPrefab, PositionFor(goalPrefab, cell, 0), Quaternion.identity, transform));
             return;
         }
 
         // Placeholder: a flat gold disc.
-        goalMarker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        goalMarker.name = "GoalMarker";
-        goalMarker.transform.SetParent(transform);
-        goalMarker.transform.position = CellToWorld(GoalCell) + Vector3.up * 0.03f;
-        goalMarker.transform.localScale = new Vector3(cellSize * 0.8f, 0.03f, cellSize * 0.8f);
-        Destroy(goalMarker.GetComponent<Collider>()); // never block mouse raycasts
-        goalMarker.GetComponent<Renderer>().material.color = new Color(1f, 0.85f, 0.1f);
+        GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        marker.name = "GoalMarker";
+        marker.transform.SetParent(transform);
+        marker.transform.position = CellToWorld(cell) + Vector3.up * 0.03f;
+        marker.transform.localScale = new Vector3(cellSize * 0.8f, 0.03f, cellSize * 0.8f);
+        Destroy(marker.GetComponent<Collider>()); // never block mouse raycasts
+        marker.GetComponent<Renderer>().material.color = new Color(1f, 0.85f, 0.1f);
+        goalMarkers.Add(marker);
     }
 
-    // Clears all tiles and picks a new goal. Used by the Restart button.
+    // Clears all tiles and picks new domes. Used by the Restart button.
     public void ResetBoard()
     {
         for (int x = 0; x < width; x++)
@@ -247,8 +319,10 @@ public class GridManager : MonoBehaviour
         placedCounts.Clear();
         RestoreAllBlanks();
 
-        if (goalMarker != null) Destroy(goalMarker);
-        PlaceGoal();
+        foreach (GameObject marker in goalMarkers) if (marker != null) Destroy(marker);
+        goalMarkers.Clear();
+        visitedGoalCells.Clear();
+        PlaceGoals();
     }
 
     // ---------- Placement rules ----------
@@ -264,13 +338,13 @@ public class GridManager : MonoBehaviour
         (Openings.West,  new Vector2Int(-1, 0)),
     };
 
-    // Openings of whatever is in a cell. The empty start and goal cells act as crossroads
-    // so the player can leave the start and step into the goal.
+    // Openings of whatever is in a cell. The empty start and dome cells act as crossroads
+    // so the player can leave the start and step into a dome.
     public Openings GetOpenings(Vector2Int c)
     {
         PlacedTile tile = GetTile(c);
         if (tile != null) return tile.openings;
-        return (c == startCell || c == GoalCell)
+        return (c == startCell || IsGoal(c))
             ? Openings.North | Openings.East | Openings.South | Openings.West
             : Openings.None;
     }
@@ -278,7 +352,7 @@ public class GridManager : MonoBehaviour
     public bool CanPlace(Vector2Int c, TileDefinition def, int rotationSteps)
     {
         if (def == null || !IsInBounds(c) || IsOccupied(c)) return false;
-        if (c == startCell || c == GoalCell) return false; // these two cells stay free
+        if (c == startCell || IsGoal(c)) return false; // the start and the domes stay free
         if (def.maxCount > 0 && PlacedCount(def) >= def.maxCount) return false;
 
         Openings newOpenings = PathUtil.Rotate(PathUtil.BaseOpenings(def.pathType), rotationSteps);
@@ -289,9 +363,9 @@ public class GridManager : MonoBehaviour
             Vector2Int neighbour = c + offset;
             if (!IsInBounds(neighbour)) continue;
 
-            // The goal is only a destination. It doesn't count as something to build from,
-            // otherwise you could start a path out of thin air next to it.
-            if (neighbour == GoalCell) continue;
+            // A dome you haven't reached yet is only a destination. Building from it would start a path
+            // out of thin air. Once visited, it works like the start tile: a crossroads with 4 open sides.
+            if (IsGoal(neighbour) && !buildFromUnvisitedDomes && !visitedGoalCells.Contains(neighbour)) continue;
 
             Openings neighbourOpenings = GetOpenings(neighbour);
             if (neighbourOpenings == Openings.None) continue; // empty cell, nothing to match
@@ -395,10 +469,11 @@ public class GridManager : MonoBehaviour
 
         if (cells == null) return;
 
-        // Gold marker on the goal cell (only once the game is running and a goal exists).
+        // Gold marker on each dome cell (only once the game is running).
         Gizmos.color = new Color(1f, 0.85f, 0.1f, 0.6f);
-        Gizmos.DrawCube(CellToWorld(GoalCell) + Vector3.up * 0.02f,
-                        new Vector3(cellSize * 0.9f, 0.02f, cellSize * 0.9f));
+        foreach (Vector2Int g in goals)
+            Gizmos.DrawCube(CellToWorld(g) + Vector3.up * 0.02f,
+                            new Vector3(cellSize * 0.9f, 0.02f, cellSize * 0.9f));
 
         // Draw a line out of each open side so you can see rotation working on the generic prefab.
         Gizmos.color = Color.yellow;

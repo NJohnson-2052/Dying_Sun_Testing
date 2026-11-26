@@ -17,6 +17,9 @@ public class FlashlightEnergy : MonoBehaviour
     [Tooltip("Energy spent each time a tile is placed.")]
     [Min(0)] [SerializeField] private int costPerTile = 1;
 
+    [Tooltip("On: stepping onto any dome recharges the flashlight too, not just the start tile.")]
+    [SerializeField] private bool rechargeAtDomes = true;
+
     [Tooltip("Shows the energy bar on screen.")]
     [SerializeField] private bool showHud = true;
 
@@ -77,8 +80,11 @@ public class FlashlightEnergy : MonoBehaviour
 
     void OnPlayerStep()
     {
-        // Stepping onto the start tile recharges the flashlight.
-        if (grid != null && player.CurrentCell == grid.startCell && Current < maxEnergy) Recharge();
+        // Stepping onto the start tile (or a dome) recharges the flashlight.
+        if (grid == null || Current >= maxEnergy) return;
+
+        Vector2Int cell = player.CurrentCell;
+        if (cell == grid.startCell || (rechargeAtDomes && grid.IsGoal(cell))) Recharge();
     }
 
     void OnPlayerReset()
@@ -147,7 +153,7 @@ public class FlashlightEnergy : MonoBehaviour
         if (!CanPlaceAnything && player != null && !player.HasWon)
         {
             label.normal.textColor = new Color(1f, 0.6f, 0.3f);
-            GUI.Label(new Rect(x, y + height + 6f, 420f, 22f), "Out of energy! Walk back to the start to recharge.", label);
+            GUI.Label(new Rect(x, y + height + 6f, 420f, 22f), "Out of energy! Walk to the start or a dome to recharge.", label);
         }
 
         GUI.color = Color.white;
