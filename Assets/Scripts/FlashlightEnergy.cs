@@ -11,8 +11,8 @@ public class FlashlightEnergy : MonoBehaviour
     [SerializeField] private GridManager grid;
 
     [Header("Energy")]
-    [Tooltip("How much energy a full flashlight holds.")]
-    [Min(1)] [SerializeField] private int maxEnergy = 10;
+    [Tooltip("How much energy a full flashlight holds at the start. Crafting a Bigger Battery raises it during a run.")]
+    [Min(1)] [SerializeField] private int baseMaxEnergy = 5;
 
     [Tooltip("Energy spent each time a tile is placed.")]
     [Min(0)] [SerializeField] private int costPerTile = 1;
@@ -24,7 +24,9 @@ public class FlashlightEnergy : MonoBehaviour
     [SerializeField] private bool showHud = true;
 
     public int Current { get; private set; }
-    public int Max => maxEnergy;
+    // The current capacity: the base plus whatever Bigger Battery upgrades you crafted this run.
+    public int Max => baseMaxEnergy + bonusMax;
+    private int bonusMax;
 
     // True while there is enough energy to place at least one tile.
     public bool CanPlaceAnything => Current >= costPerTile;
@@ -39,7 +41,7 @@ public class FlashlightEnergy : MonoBehaviour
     {
         if (player == null) player = FindObjectOfType<PlayerController>();
         if (grid == null) grid = FindObjectOfType<GridManager>();
-        Current = maxEnergy;
+        Current = Max;
     }
 
     void OnEnable()
@@ -81,7 +83,7 @@ public class FlashlightEnergy : MonoBehaviour
     void OnPlayerStep()
     {
         // Stepping onto the start tile (or a dome) recharges the flashlight.
-        if (grid == null || Current >= maxEnergy) return;
+        if (grid == null || Current >= Max) return;
 
         Vector2Int cell = player.CurrentCell;
         if (cell == grid.startCell || (rechargeAtDomes && grid.IsGoal(cell))) Recharge();
@@ -89,13 +91,32 @@ public class FlashlightEnergy : MonoBehaviour
 
     void OnPlayerReset()
     {
-        Current = maxEnergy;
+        bonusMax = 0;
+        Current = Max;
+        EnergyChanged?.Invoke();
+    }
+
+    // Gives back some energy (never above Max). Used by crafting.
+    public void Restore(int amount)
+    {
+        Current = Mathf.Min(Max, Current + Mathf.Max(0, amount));
+        rechargeFlashUntil = Time.unscaledTime + 1.2f;
+        EnergyChanged?.Invoke();
+    }
+
+    // Makes the battery bigger for the rest of this run, and fills the new space. Used by crafting.
+    public void UpgradeMax(int amount)
+    {
+        int extra = Mathf.Max(0, amount);
+        bonusMax += extra;
+        Current = Mathf.Min(Max, Current + extra);
+        rechargeFlashUntil = Time.unscaledTime + 1.2f;
         EnergyChanged?.Invoke();
     }
 
     public void Recharge()
     {
-        Current = maxEnergy;
+        Current = Max;
         rechargeFlashUntil = Time.unscaledTime + 1.2f;
         EnergyChanged?.Invoke();
         Recharged?.Invoke();
@@ -119,7 +140,7 @@ public class FlashlightEnergy : MonoBehaviour
 
         bool lowFlash = Time.unscaledTime < lowFlashUntil;
         bool rechargeFlash = Time.unscaledTime < rechargeFlashUntil;
-        bool low = Current <= Mathf.Max(1, maxEnergy / 4);
+        bool low = Current <= Mathf.Max(1, Max / 4);
 
         // Border: red when you couldn't afford a tile, bright when just recharged.
         Color border = lowFlash ? new Color(1f, 0.25f, 0.2f) : rechargeFlash ? new Color(1f, 1f, 0.7f) : new Color(0f, 0f, 0f, 0.8f);
@@ -130,11 +151,11 @@ public class FlashlightEnergy : MonoBehaviour
         Color on = low ? new Color(1f, 0.45f, 0.2f) : new Color(1f, 0.88f, 0.35f);
         if (rechargeFlash) on = Color.Lerp(on, Color.white, 0.5f);
 
-        if (maxEnergy <= 24)
+        if (Max <= 24)
         {
             float gap = 2f;
-            float block = (width - gap * (maxEnergy + 1)) / maxEnergy;
-            for (int i = 0; i < maxEnergy; i++)
+            float block = (width - gap * (Max + 1)) / Max;
+            for (int i = 0; i < Max; i++)
             {
                 Rect r = new Rect(x + gap + i * (block + gap), y + gap, block, height - gap * 2f);
                 Fill(r, i < Current ? on : new Color(1f, 1f, 1f, 0.07f));
@@ -142,12 +163,12 @@ public class FlashlightEnergy : MonoBehaviour
         }
         else
         {
-            Fill(new Rect(x + 2f, y + 2f, (width - 4f) * Current / maxEnergy, height - 4f), on);
+            Fill(new Rect(x + 2f, y + 2f, (width - 4f) * Current / Max, height - 4f), on);
         }
 
         var label = new GUIStyle(GUI.skin.label) { fontSize = 12, fontStyle = FontStyle.Bold };
         label.normal.textColor = Color.white;
-        GUI.Label(new Rect(x + width + 8f, y - 2f, 160f, 22f), rechargeFlash ? "Recharged!" : "Flashlight " + Current + "/" + maxEnergy, label);
+        GUI.Label(new Rect(x + width + 8f, y - 2f, 160f, 22f), rechargeFlash ? "Recharged!" : "Flashlight " + Current + "/" + Max, label);
 
         // A hint when the flashlight can't light another tile.
         if (!CanPlaceAnything && player != null && !player.HasWon)

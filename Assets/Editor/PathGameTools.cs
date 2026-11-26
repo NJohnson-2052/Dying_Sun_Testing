@@ -432,6 +432,80 @@ public static class PathGameTools
         Debug.Log("Path Game: energy and chase camera ready. Tune them on the Flashlight Energy object and the Main Camera.");
     }
 
+    // One click: saves the four starter crafting recipes as assets you can edit (Assets/Data/Crafting),
+    // adds a Crafting Manager to the scene, and fills its recipe list.
+    // Safe to run again: existing recipe assets are kept, so your edited prices are never overwritten.
+    [MenuItem("Path Game/Add Crafting System To Scene")]
+    static void AddCraftingSystem()
+    {
+        PlayerController player = Object.FindObjectOfType<PlayerController>();
+        GridManager grid = Object.FindObjectOfType<GridManager>();
+        if (player == null || grid == null)
+        {
+            Debug.LogWarning("Path Game: no Player or Grid found in the open scene.");
+            return;
+        }
+
+        // 1. The recipe assets. A recipe that already has an asset is left alone.
+        EnsureFolder("Assets", "Data");
+        EnsureFolder("Assets/Data", "Crafting");
+
+        var assets = new List<CraftingRecipe>();
+        foreach (CraftingRecipe recipe in CraftingManager.BuildDefaultRecipes())
+        {
+            string path = "Assets/Data/Crafting/" + recipe.displayName.Replace(" ", "") + ".asset";
+            CraftingRecipe existing = AssetDatabase.LoadAssetAtPath<CraftingRecipe>(path);
+            if (existing != null)
+            {
+                assets.Add(existing);
+                Object.DestroyImmediate(recipe);
+            }
+            else
+            {
+                AssetDatabase.CreateAsset(recipe, path);
+                assets.Add(recipe);
+            }
+        }
+        AssetDatabase.SaveAssets();
+
+        // 2. The manager object.
+        CraftingManager manager = Object.FindObjectOfType<CraftingManager>();
+        if (manager == null)
+        {
+            GameObject go = new GameObject("Crafting");
+            Undo.RegisterCreatedObjectUndo(go, "Add crafting system");
+            manager = go.AddComponent<CraftingManager>();
+        }
+
+        // 3. Wire it up (the fields are private, so go through the serialized object).
+        var so = new SerializedObject(manager);
+        so.FindProperty("player").objectReferenceValue = player;
+        so.FindProperty("grid").objectReferenceValue = grid;
+        so.FindProperty("energy").objectReferenceValue = Object.FindObjectOfType<FlashlightEnergy>();
+        so.FindProperty("deck").objectReferenceValue = Object.FindObjectOfType<TileDeck>();
+
+        SerializedProperty list = so.FindProperty("recipes");
+        foreach (CraftingRecipe asset in assets)
+        {
+            bool alreadyListed = false;
+            for (int i = 0; i < list.arraySize; i++)
+                if (list.GetArrayElementAtIndex(i).objectReferenceValue == asset) alreadyListed = true;
+
+            if (!alreadyListed)
+            {
+                list.arraySize++;
+                list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = asset;
+            }
+        }
+
+        so.ApplyModifiedProperties();
+        EditorSceneManager.MarkSceneDirty(manager.gameObject.scene);
+
+        Selection.activeObject = assets.Count > 0 ? (Object)assets[0] : manager.gameObject;
+        Debug.Log("Path Game: crafting ready. Recipes are in Assets/Data/Crafting: click one to change its prices. " +
+                  "Make more with right-click > Create > Path Game > Crafting, then add them to the Crafting object's list.");
+    }
+
     static void EnsureFolder(string parent, string name)
     {
         if (!AssetDatabase.IsValidFolder(parent + "/" + name)) AssetDatabase.CreateFolder(parent, name);

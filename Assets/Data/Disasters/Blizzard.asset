@@ -27,5 +27,5 @@ MonoBehaviour:
     cameraShake: 0.15
   affects: 
   onlyOneRandomType: 0
-  minLoss: 1
-  maxLoss: 2
+  minLoss: 2
+  maxLoss: 5

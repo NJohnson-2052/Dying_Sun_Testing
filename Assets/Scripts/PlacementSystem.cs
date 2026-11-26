@@ -26,6 +26,10 @@ public class PlacementSystem : MonoBehaviour
     [SerializeField]
     private FlashlightEnergy energy;
 
+    [Tooltip("Off: right-clicking a tile does nothing, and the only way to remove a tile is to craft Demolish Tile. On: right-click removes tiles for free.")]
+    [SerializeField]
+    private bool freeTileRemoval = false;
+
     [Header("Card river layout (screen pixels)")]
     [SerializeField] private float cardWidth = 110f;
     [SerializeField] private float cardHeight = 150f;
@@ -125,7 +129,10 @@ public class PlacementSystem : MonoBehaviour
 
         Vector3 mouseWorld = inputManager.GetSelectedMapPosition();
         Vector2Int cell = grid.WorldToCell(mouseWorld);
-        bool overCards = IsMouseOverRiver();
+        // Clicks on the cards or on the crafting panel must not also hit the board underneath.
+        CraftingManager crafting = CraftingManager.Instance;
+        bool overCards = IsMouseOverRiver() || (crafting != null && crafting.IsMouseOverPanel());
+        bool craftingTarget = crafting != null && crafting.IsTargeting;
         bool gameWon = player != null && player.HasWon;
         bool inBounds = grid.IsInBounds(cell) && !overCards && !gameWon && !IsBusy;
 
@@ -142,6 +149,13 @@ public class PlacementSystem : MonoBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
+            // While a crafting option is waiting for a target, the click goes to it and nothing else.
+            if (craftingTarget)
+            {
+                crafting.TryTarget(cell);
+                return;
+            }
+
             if (grid.IsOccupied(cell) || cell == grid.startCell || grid.IsGoal(cell))
             {
                 // Clicking an existing tile (or the start / goal) = walk there.
@@ -162,8 +176,8 @@ public class PlacementSystem : MonoBehaviour
             }
         }
 
-        // Right click removes a tile, but never the one the player is standing on.
-        if (Input.GetMouseButtonDown(1) && (player == null || cell != player.CurrentCell))
+        // Right click removes a tile for free (only if Free Tile Removal is on), but never the one the player is standing on.
+        if (freeTileRemoval && !craftingTarget && Input.GetMouseButtonDown(1) && (player == null || cell != player.CurrentCell))
         {
             // Removing a tile changes where things can go, so re-check the hand.
             if (grid.Remove(cell)) deck.EnsurePlayable();
@@ -197,7 +211,9 @@ public class PlacementSystem : MonoBehaviour
         if (ghost == null || ghostFor != tile) BuildGhost(tile);
 
         // Show over any free cell: green if the tile can go here, red if it can't.
-        bool show = inBounds && !grid.IsOccupied(cell) && cell != grid.startCell && !grid.IsGoal(cell);
+        // Hidden while a crafting option is waiting for you to pick a cell.
+        bool aimingCraft = CraftingManager.Instance != null && CraftingManager.Instance.IsTargeting;
+        bool show = inBounds && !aimingCraft && !grid.IsOccupied(cell) && cell != grid.startCell && !grid.IsGoal(cell);
         ghost.SetActive(show);
         UpdateOpeningMarkers(tile, cell, show);
         if (!show) return;
@@ -607,7 +623,9 @@ public class PlacementSystem : MonoBehaviour
 
         string message = null;
         if (player != null && player.HasWon) message = "All " + grid.Goals.Count + " domes reached!";
-        else if (deck.NoMovesLeft) message = "No legal placements left. Right-click a tile to remove it, or Restart.";
+        else if (deck.NoMovesLeft) message = freeTileRemoval
+            ? "No legal placements left. Right-click a tile to remove it, or Restart."
+            : "No legal placements left. Craft Demolish Tile to remove one, or Restart.";
         if (message == null) return;
 
         var style = new GUIStyle(GUI.skin.label)

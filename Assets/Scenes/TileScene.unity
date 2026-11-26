@@ -155,6 +155,7 @@ MonoBehaviour:
   grid: {fileID: 487136168}
   disasters:
   - {fileID: 0}
+  - {fileID: 0}
   - {fileID: 11400000, guid: bc7142864e38a8a49a7f44272ea23926, type: 2}
   countEveryTileStep: 1
   showHud: 1
@@ -209,7 +210,12 @@ MonoBehaviour:
   startCell: {x: 0, y: 0}
   requireAllNeighborsMatch: 0
   goalPrefab: {fileID: 6761545184518630133, guid: 4690af76db3aa3b408b44f01e4598de0, type: 3}
+  goalCount: 3
   minGoalDistance: 12
+  buildFromUnvisitedDomes: 0
+  firstGoalMinDistance: 2
+  firstGoalMaxDistance: 4
+  minGoalSpacing: 6
   blankPrefab: {fileID: 6565375701088707574, guid: 88194b91606ae8b439291c6de483bcd1, type: 3}
   autoFitToBlank: 1
   dropHeight: 25
@@ -612,6 +618,7 @@ MonoBehaviour:
   deck: {fileID: 2058655595}
   player: {fileID: 1185100169}
   energy: {fileID: 1572714469}
+  freeTileRemoval: 0
   cardWidth: 110
   cardHeight: 150
   cardGap: 11
@@ -944,8 +951,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   player: {fileID: 1185100169}
   grid: {fileID: 487136168}
-  maxEnergy: 10
+  baseMaxEnergy: 5
   costPerTile: 1
+  rechargeAtDomes: 1
   showHud: 1
 --- !u!4 &1572714470
 Transform:

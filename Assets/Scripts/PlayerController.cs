@@ -92,6 +92,21 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
+    // Jumps straight to a cell (used by the Teleport crafting option). Counts as a move, so it is one turn.
+    public bool TeleportTo(Vector2Int cell)
+    {
+        if (HasWon || IsMoving || !grid.IsInBounds(cell)) return false;
+
+        PickupBurst.Spawn(transform.position + Vector3.up * 0.3f, new Color(0.5f, 0.9f, 1f), 16);
+        CurrentCell = cell;
+        transform.position = CellToStandPoint(cell);
+        PickupBurst.Spawn(transform.position + Vector3.up * 0.3f, new Color(0.5f, 0.9f, 1f), 16);
+
+        StepTaken?.Invoke();     // lets the flashlight recharge if it's the start or a dome
+        MoveFinished?.Invoke();  // and counts as a turn for disasters
+        return true;
+    }
+
     IEnumerator WalkPath(List<Vector2Int> path)
     {
         int steps = 0;
