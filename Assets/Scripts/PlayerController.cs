@@ -26,16 +26,26 @@ public class PlayerController : MonoBehaviour
     public bool IsMoving => moveRoutine != null;
     public event Action ResourcesChanged;
 
-    // You win once every dome has been visited.
+    // The run: visit every dome -> the Cellar appears -> visit the Cellar -> return to the ship (the start tile).
+    // HasWon becomes true when you get back to the ship after the Cellar.
     public bool HasWon { get; private set; }
-    public event Action ReachedGoal;          // fired once, when the LAST dome is reached
+    public event Action ReachedGoal;          // fired once, when the run is complete
 
     // Fired the first time the player steps onto each dome. Passes that dome's cell.
     public event Action<Vector2Int> GoalVisited;
 
-    private readonly HashSet<Vector2Int> visitedGoals = new HashSet<Vector2Int>();
-    public int GoalsVisited => visitedGoals.Count;
-    public bool HasVisited(Vector2Int cell) => visitedGoals.Contains(cell);
+    // Fired when the last dome is visited and the Cellar has just appeared.
+    public event Action AllDomesVisited;
+
+    // Fired the first time the player steps onto the Cellar. Passes its cell.
+    public event Action<Vector2Int> CellarVisited;
+
+    private readonly HashSet<Vector2Int> visitedGoals = new HashSet<Vector2Int>();   // domes only
+    private bool cellarVisited;
+
+    public int GoalsVisited => visitedGoals.Count;                                   // domes only
+    public bool CellarFound => cellarVisited;
+    public bool HasVisited(Vector2Int cell) => visitedGoals.Contains(cell) || (cellarVisited && grid.IsCellar(cell));
 
     // Used by the disaster system to count turns.
     // Fired after each tile the player steps onto (not the goal tile, which ends the game).
@@ -102,6 +112,8 @@ public class PlayerController : MonoBehaviour
         transform.position = CellToStandPoint(cell);
         PickupBurst.Spawn(transform.position + Vector3.up * 0.3f, new Color(0.5f, 0.9f, 1f), 16);
 
+        if (HandleArrival(cell)) return true; // teleporting back to the ship after the Cellar completes the run
+
         StepTaken?.Invoke();     // lets the flashlight recharge if it's the start or a dome
         MoveFinished?.Invoke();  // and counts as a turn for disasters
         return true;
@@ -148,22 +160,8 @@ public class PlayerController : MonoBehaviour
             steps++;
             Collect(cell);
 
-            // Stepping onto a dome marks it as visited. The walk carries on unless that was the last one.
-            if (grid.IsGoal(cell))
-            {
-                if (visitedGoals.Add(cell))
-                {
-                    grid.MarkGoalVisited(cell); // lets you build out of this dome from now on
-                    GoalVisited?.Invoke(cell);
-                }
-
-                if (visitedGoals.Count >= grid.Goals.Count)
-                {
-                    HasWon = true;
-                    ReachedGoal?.Invoke();
-                    break;
-                }
-            }
+            // Domes, the Cellar and the ship are handled here. The walk only ends early if the run was just completed.
+            if (HandleArrival(cell)) break;
 
             StepTaken?.Invoke();
         }
@@ -171,6 +169,39 @@ public class PlayerController : MonoBehaviour
 
         // The walk is over. This counts as one turn.
         if (steps > 0) MoveFinished?.Invoke();
+    }
+
+    // Runs every time the player arrives on a cell. Returns true if that just completed the run.
+    bool HandleArrival(Vector2Int cell)
+    {
+        if (grid.IsCellar(cell))
+        {
+            if (!cellarVisited)
+            {
+                cellarVisited = true;
+                grid.MarkGoalVisited(cell); // lets you build out of the Cellar from now on
+                CellarVisited?.Invoke(cell);
+            }
+        }
+        else if (grid.IsDome(cell) && visitedGoals.Add(cell))
+        {
+            grid.MarkGoalVisited(cell); // lets you build out of this dome from now on
+            GoalVisited?.Invoke(cell);
+
+            // The last dome makes the Cellar appear somewhere on the board.
+            if (visitedGoals.Count >= grid.Goals.Count && !grid.HasCellar && grid.SpawnCellar(cell))
+                AllDomesVisited?.Invoke();
+        }
+
+        // Back at the ship after visiting the Cellar: the run is complete.
+        if (cellarVisited && cell == grid.startCell)
+        {
+            HasWon = true;
+            ReachedGoal?.Invoke();
+            return true;
+        }
+
+        return false;
     }
 
     void Collect(Vector2Int cell)
@@ -194,6 +225,7 @@ public class PlayerController : MonoBehaviour
         resources.Clear();
         collectedCells.Clear();
         visitedGoals.Clear();
+        cellarVisited = false;
         HasWon = false;
 
         CurrentCell = grid.startCell;

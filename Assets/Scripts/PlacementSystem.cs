@@ -622,7 +622,7 @@ public class PlacementSystem : MonoBehaviour
         if (GUI.Button(new Rect(Screen.width - 110, 10, 100, 28), "Restart")) RestartGame();
 
         string message = null;
-        if (player != null && player.HasWon) message = "All " + grid.Goals.Count + " domes reached!";
+        if (player != null && player.HasWon) message = "Run complete! You made it back to the ship.";
         else if (deck.NoMovesLeft) message = freeTileRemoval
             ? "No legal placements left. Right-click a tile to remove it, or Restart."
             : "No legal placements left. Craft Demolish Tile to remove one, or Restart.";

@@ -48,6 +48,16 @@ public class GridManager : MonoBehaviour
     [Tooltip("Every dome is at least this many steps from every OTHER dome. Bigger = the domes are more spread out, so the player has to explore more of the board. Try 6 for 8x8 and 9 or more for 16x16. If the board is too small for it, it is relaxed automatically.")]
     public int minGoalSpacing = 6;
 
+    [Header("Cellar (the final stop)")]
+    [Tooltip("Optional model for the Cellar. Leave empty to get a purple disc until you have one.")]
+    public GameObject cellarPrefab;
+
+    [Tooltip("When the last dome is visited, the Cellar appears at least this many steps from the start (the ship).")]
+    public int cellarMinDistanceFromStart = 6;
+
+    [Tooltip("...and at least this many steps from where the player is standing at that moment.")]
+    public int cellarMinDistanceFromPlayer = 3;
+
     [Header("Visuals")]
     [Tooltip("Shown on every empty cell until a tile is placed there (your Tile_Blank prefab).")]
     public GameObject blankPrefab;
@@ -72,7 +82,15 @@ public class GridManager : MonoBehaviour
     public IReadOnlyList<Vector2Int> Goals => goals;
     private readonly List<Vector2Int> goals = new List<Vector2Int>();
 
-    public bool IsGoal(Vector2Int c) => goals.Contains(c);
+    // The Cellar: the final stop. It only exists after every dome has been visited.
+    public bool HasCellar { get; private set; }
+    public Vector2Int CellarCell { get; private set; }
+
+    public bool IsDome(Vector2Int c) => goals.Contains(c);
+    public bool IsCellar(Vector2Int c) => HasCellar && c == CellarCell;
+
+    // True for any destination cell: a dome or the Cellar. They behave alike (crossroads you can walk into).
+    public bool IsGoal(Vector2Int c) => IsDome(c) || IsCellar(c);
 
     // Domes the player has stepped on. A visited dome works like the start tile: you can build out of it on all 4 sides.
     private readonly HashSet<Vector2Int> visitedGoalCells = new HashSet<Vector2Int>();
@@ -287,23 +305,62 @@ public class GridManager : MonoBehaviour
 
     static int Manhattan(Vector2Int a, Vector2Int b) => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
 
-    void SpawnGoalMarker(Vector2Int cell)
+    void SpawnGoalMarker(Vector2Int cell) => SpawnMarker(cell, goalPrefab, new Color(1f, 0.85f, 0.1f), "GoalMarker");
+
+    void SpawnMarker(Vector2Int cell, GameObject prefab, Color placeholderColor, string markerName)
     {
-        if (goalPrefab != null)
+        if (prefab != null)
         {
-            goalMarkers.Add(Instantiate(goalPrefab, PositionFor(goalPrefab, cell, 0), Quaternion.identity, transform));
+            goalMarkers.Add(Instantiate(prefab, PositionFor(prefab, cell, 0), Quaternion.identity, transform));
             return;
         }
 
-        // Placeholder: a flat gold disc.
+        // Placeholder: a flat colored disc.
         GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        marker.name = "GoalMarker";
+        marker.name = markerName;
         marker.transform.SetParent(transform);
         marker.transform.position = CellToWorld(cell) + Vector3.up * 0.03f;
         marker.transform.localScale = new Vector3(cellSize * 0.8f, 0.03f, cellSize * 0.8f);
         Destroy(marker.GetComponent<Collider>()); // never block mouse raycasts
-        marker.GetComponent<Renderer>().material.color = new Color(1f, 0.85f, 0.1f);
+        marker.GetComponent<Renderer>().material.color = placeholderColor;
         goalMarkers.Add(marker);
+    }
+
+    // Called when the last dome has been visited: the Cellar appears on a random free cell.
+    // It keeps its distance from the start and from the player so it takes a real trip to reach.
+    public bool SpawnCellar(Vector2Int playerCell)
+    {
+        if (HasCellar) return false;
+
+        // Try the distances you asked for first, then relax them if the board has no room.
+        int[,] tiers = { { cellarMinDistanceFromStart, cellarMinDistanceFromPlayer },
+                         { cellarMinDistanceFromStart, 0 },
+                         { 0, 0 } };
+
+        var pool = new List<Vector2Int>();
+        for (int t = 0; t < 3 && pool.Count == 0; t++)
+        {
+            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var c = new Vector2Int(x, y);
+                if (c == startCell || c == playerCell || IsDome(c) || IsOccupied(c)) continue;
+                if (Manhattan(c, startCell) < tiers[t, 0] || Manhattan(c, playerCell) < tiers[t, 1]) continue;
+                pool.Add(c);
+            }
+        }
+
+        if (pool.Count == 0)
+        {
+            Debug.LogWarning("Grid: there is no free cell left for the Cellar.");
+            return false;
+        }
+
+        CellarCell = pool[Random.Range(0, pool.Count)];
+        HasCellar = true;
+        SetBlankActive(CellarCell, false); // the Cellar replaces the blank underneath
+        SpawnMarker(CellarCell, cellarPrefab, new Color(0.6f, 0.3f, 0.9f), "CellarMarker");
+        return true;
     }
 
     // Clears all tiles and picks new domes. Used by the Restart button.
@@ -322,6 +379,7 @@ public class GridManager : MonoBehaviour
         foreach (GameObject marker in goalMarkers) if (marker != null) Destroy(marker);
         goalMarkers.Clear();
         visitedGoalCells.Clear();
+        HasCellar = false;
         PlaceGoals();
     }
 
@@ -352,7 +410,7 @@ public class GridManager : MonoBehaviour
     public bool CanPlace(Vector2Int c, TileDefinition def, int rotationSteps)
     {
         if (def == null || !IsInBounds(c) || IsOccupied(c)) return false;
-        if (c == startCell || IsGoal(c)) return false; // the start and the domes stay free
+        if (c == startCell || IsGoal(c)) return false; // the start, the domes and the Cellar stay free
         if (def.maxCount > 0 && PlacedCount(def) >= def.maxCount) return false;
 
         Openings newOpenings = PathUtil.Rotate(PathUtil.BaseOpenings(def.pathType), rotationSteps);
@@ -474,6 +532,14 @@ public class GridManager : MonoBehaviour
         foreach (Vector2Int g in goals)
             Gizmos.DrawCube(CellToWorld(g) + Vector3.up * 0.02f,
                             new Vector3(cellSize * 0.9f, 0.02f, cellSize * 0.9f));
+
+        // Purple marker on the Cellar, once it has appeared.
+        if (HasCellar)
+        {
+            Gizmos.color = new Color(0.6f, 0.3f, 0.9f, 0.6f);
+            Gizmos.DrawCube(CellToWorld(CellarCell) + Vector3.up * 0.02f,
+                            new Vector3(cellSize * 0.9f, 0.02f, cellSize * 0.9f));
+        }
 
         // Draw a line out of each open side so you can see rotation working on the generic prefab.
         Gizmos.color = Color.yellow;
