@@ -316,7 +316,7 @@ public static class PathGameTools
             return;
         }
 
-        // 1. The Blizzard asset. Only created once, so your tuning is never overwritten.
+        // 1. The Blizzard and Meteor assets. Each is only created once, so your tuning is never overwritten.
         EnsureFolder("Assets", "Data");
         EnsureFolder("Assets/Data", "Disasters");
         const string path = "Assets/Data/Disasters/Blizzard.asset";
@@ -331,6 +331,33 @@ public static class PathGameTools
             blizzard.minLoss = 1;
             blizzard.maxLoss = 2;
             AssetDatabase.CreateAsset(blizzard, path);
+            AssetDatabase.SaveAssets();
+        }
+
+        // The Meteor: only possible once you have visited the Cellar, and it takes a lot more.
+        const string meteorPath = "Assets/Data/Disasters/Meteor.asset";
+        ResourceLossDisaster meteor = AssetDatabase.LoadAssetAtPath<ResourceLossDisaster>(meteorPath);
+        if (meteor == null)
+        {
+            meteor = ScriptableObject.CreateInstance<ResourceLossDisaster>();
+            meteor.displayName = "Meteor";
+            meteor.activeFrom = DisasterStage.AfterCellarVisited;
+            meteor.weight = 2f; // twice as likely as the Blizzard to be the next pick
+            meteor.minLoss = 2;
+            meteor.maxLoss = 3;
+            meteor.visuals = new DisasterVisuals
+            {
+                tint = new Color(1f, 0.4f, 0.1f, 0.28f),
+                particleColor = new Color(1f, 0.65f, 0.25f, 1f),
+                particleCount = 90,
+                fallSpeed = 900f,
+                sideDrift = 350f,
+                sizeRange = new Vector2(4f, 10f),
+                streaks = true,
+                duration = 3f,
+                cameraShake = 0.45f
+            };
+            AssetDatabase.CreateAsset(meteor, meteorPath);
             AssetDatabase.SaveAssets();
         }
 
@@ -349,21 +376,24 @@ public static class PathGameTools
         so.FindProperty("grid").objectReferenceValue = grid;
 
         SerializedProperty list = so.FindProperty("disasters");
-        bool alreadyListed = false;
-        for (int i = 0; i < list.arraySize; i++)
-            if (list.GetArrayElementAtIndex(i).objectReferenceValue == blizzard) alreadyListed = true;
-
-        if (!alreadyListed)
+        foreach (DisasterDefinition disaster in new DisasterDefinition[] { blizzard, meteor })
         {
-            list.arraySize++;
-            list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = blizzard;
+            bool alreadyListed = false;
+            for (int i = 0; i < list.arraySize; i++)
+                if (list.GetArrayElementAtIndex(i).objectReferenceValue == disaster) alreadyListed = true;
+
+            if (!alreadyListed)
+            {
+                list.arraySize++;
+                list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = disaster;
+            }
         }
 
         so.ApplyModifiedProperties();
         EditorSceneManager.MarkSceneDirty(manager.gameObject.scene);
 
         Selection.activeObject = blizzard; // so you can tune it right away
-        Debug.Log("Path Game: disaster system ready. The Blizzard asset is in Assets/Data/Disasters. " +
+        Debug.Log("Path Game: disaster system ready. The Blizzard and Meteor assets are in Assets/Data/Disasters. " +
                   "Make more with right-click > Create > Path Game > Disaster, then add them to the Disasters object's list.");
     }
 

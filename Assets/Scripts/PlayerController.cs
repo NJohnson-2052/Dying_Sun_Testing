@@ -40,6 +40,27 @@ public class PlayerController : MonoBehaviour
     // Fired the first time the player steps onto the Cellar. Passes its cell.
     public event Action<Vector2Int> CellarVisited;
 
+    // The run can also be lost: see FailRun. After that nothing works until Restart.
+    public bool GameOver { get; private set; }
+    public string GameOverReason { get; private set; }
+    public float GameOverTime { get; private set; }   // Time.unscaledTime when it happened
+    public event Action<string> GameFailed;
+
+    // Ends the run as a failure (for example when a disaster takes your last resource).
+    public void FailRun(string reason)
+    {
+        if (GameOver || HasWon) return;
+
+        GameOver = true;
+        GameOverReason = reason;
+        GameOverTime = Time.unscaledTime;
+
+        if (moveRoutine != null) StopCoroutine(moveRoutine);
+        moveRoutine = null;
+
+        GameFailed?.Invoke(reason);
+    }
+
     private readonly HashSet<Vector2Int> visitedGoals = new HashSet<Vector2Int>();   // domes only
     private bool cellarVisited;
 
@@ -76,6 +97,17 @@ public class PlayerController : MonoBehaviour
 
     public int GetResource(ResourceType type) => resources.TryGetValue(type, out int n) ? n : 0;
 
+    // Bio + Scrap + Rations all added together.
+    public int TotalResources
+    {
+        get
+        {
+            int total = 0;
+            foreach (int amount in resources.Values) total += amount;
+            return total;
+        }
+    }
+
     // Takes resources away (a disaster, a cost...). Never goes below zero.
     // Returns how many were actually taken, which can be less than asked if the player had fewer.
     public int RemoveResource(ResourceType type, int amount)
@@ -93,7 +125,7 @@ public class PlayerController : MonoBehaviour
     // Called by PlacementSystem when the player clicks a placed tile.
     public bool TryMoveTo(Vector2Int target)
     {
-        if (HasWon || IsMoving || target == CurrentCell) return false;
+        if (HasWon || GameOver || IsMoving || target == CurrentCell) return false;
 
         List<Vector2Int> path = FindPath(CurrentCell, target);
         if (path == null) return false; // no connected route
@@ -105,7 +137,7 @@ public class PlayerController : MonoBehaviour
     // Jumps straight to a cell (used by the Teleport crafting option). Counts as a move, so it is one turn.
     public bool TeleportTo(Vector2Int cell)
     {
-        if (HasWon || IsMoving || !grid.IsInBounds(cell)) return false;
+        if (HasWon || GameOver || IsMoving || !grid.IsInBounds(cell)) return false;
 
         PickupBurst.Spawn(transform.position + Vector3.up * 0.3f, new Color(0.5f, 0.9f, 1f), 16);
         CurrentCell = cell;
@@ -227,6 +259,8 @@ public class PlayerController : MonoBehaviour
         visitedGoals.Clear();
         cellarVisited = false;
         HasWon = false;
+        GameOver = false;
+        GameOverReason = null;
 
         CurrentCell = grid.startCell;
         transform.position = CellToStandPoint(CurrentCell);

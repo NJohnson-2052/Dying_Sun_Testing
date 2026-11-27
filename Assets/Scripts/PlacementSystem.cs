@@ -133,7 +133,7 @@ public class PlacementSystem : MonoBehaviour
         CraftingManager crafting = CraftingManager.Instance;
         bool overCards = IsMouseOverRiver() || (crafting != null && crafting.IsMouseOverPanel());
         bool craftingTarget = crafting != null && crafting.IsTargeting;
-        bool gameWon = player != null && player.HasWon;
+        bool gameWon = player != null && (player.HasWon || player.GameOver); // the run is over, win or lose
         bool inBounds = grid.IsInBounds(cell) && !overCards && !gameWon && !IsBusy;
 
         if (mouseIndicator != null)
@@ -520,6 +520,9 @@ public class PlacementSystem : MonoBehaviour
     {
         if (deck == null || deck.Hand == null) return;
 
+        // The Game Over screen has to sit on top of everything except the disaster effects.
+        GUI.depth = (player != null && player.GameOver) ? -50 : 0;
+
         Rect river = RiverRect();
         for (int i = 0; i < deck.Hand.Length; i++)
         {
@@ -621,6 +624,12 @@ public class PlacementSystem : MonoBehaviour
     {
         if (GUI.Button(new Rect(Screen.width - 110, 10, 100, 28), "Restart")) RestartGame();
 
+        if (player != null && player.GameOver)
+        {
+            DrawGameOver();
+            return;
+        }
+
         string message = null;
         if (player != null && player.HasWon) message = "Run complete! You made it back to the ship.";
         else if (deck.NoMovesLeft) message = freeTileRemoval
@@ -636,6 +645,32 @@ public class PlacementSystem : MonoBehaviour
         };
         style.normal.textColor = Color.white;
         GUI.Label(new Rect(0, Screen.height * 0.2f, Screen.width, 50), message, style);
+    }
+
+    // The fail screen: dims the game, says why, and offers a Restart. It appears a moment after the
+    // disaster that caused it, so the player can see what hit them first.
+    void DrawGameOver()
+    {
+        float t = Time.unscaledTime - player.GameOverTime - 1.2f;
+        if (t <= 0f) return;
+        float alpha = Mathf.Clamp01(t / 0.6f);
+
+        GUI.color = new Color(0.02f, 0.02f, 0.05f, 0.78f * alpha);
+        GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+
+        var title = new GUIStyle(GUI.skin.label) { fontSize = 72, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        var reason = new GUIStyle(title) { fontSize = 26, fontStyle = FontStyle.Normal };
+
+        title.normal.textColor = new Color(1f, 0.3f, 0.25f, alpha);
+        GUI.Label(new Rect(0f, Screen.height * 0.30f, Screen.width, 90f), "GAME OVER", title);
+
+        reason.normal.textColor = new Color(1f, 1f, 1f, alpha);
+        GUI.Label(new Rect(0f, Screen.height * 0.30f + 90f, Screen.width, 40f), player.GameOverReason, reason);
+
+        GUI.color = new Color(1f, 1f, 1f, alpha);
+        if (GUI.Button(new Rect(Screen.width * 0.5f - 100f, Screen.height * 0.30f + 160f, 200f, 50f), "Restart")) RestartGame();
+        GUI.color = Color.white;
     }
 
     void RestartGame()

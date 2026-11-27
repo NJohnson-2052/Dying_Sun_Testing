@@ -147,6 +147,7 @@ public class CraftingManager : MonoBehaviour
     {
         if (player == null || grid == null) return "Not ready";
         if (player.HasWon) return "You already won!";
+        if (player.GameOver) return "Game over";
         if (player.IsMoving) return "Wait until you stop moving";
         if (recipe.maxUses > 0 && Uses(recipe) >= recipe.maxUses) return "Used up this run";
         return recipe.BlockedReason(context);
@@ -245,7 +246,7 @@ public class CraftingManager : MonoBehaviour
         if (targeting != null)
         {
             bool cancel = Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1);
-            if (cancel || player == null || player.HasWon || player.IsMoving) CancelTargeting();
+            if (cancel || player == null || player.HasWon || player.GameOver || player.IsMoving) CancelTargeting();
         }
     }
 

@@ -2,23 +2,48 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// Counts the player's turns and sets off disasters when their turn comes.
+// Counts the player's turns and sets off disasters.
 // A "turn" is one completed move by the player (one click-to-walk), or every single tile stepped
 // if you turn on Count Every Tile Step. Placing tiles does not count as a turn.
 //
+// Two ways a disaster can be triggered (set per disaster, on its asset):
+//   Random Pool  - every few turns the game picks one disaster from the pool at random.
+//   Own Schedule - the disaster strikes on its own fixed rhythm.
+// Each disaster also has an "Active From" stage, so something like the Meteor can wait until the Cellar.
+//
+// This also ends the run: if a disaster leaves the player with no resources at all, it is Game Over.
+//
 // Setup: click Path Game > Add Disaster System To Scene. It makes this object, wires it up,
-// and creates a Blizzard disaster for you.
+// and creates the Blizzard and Meteor disasters for you.
 public class DisasterManager : MonoBehaviour
 {
     [SerializeField] private PlayerController player;
     [SerializeField] private GridManager grid;
 
-    [Tooltip("Every disaster in this list is checked after each turn. Drag more disaster assets in here.")]
+    [Tooltip("Every disaster in this list is considered. Drag more disaster assets in here.")]
     [SerializeField] private List<DisasterDefinition> disasters = new List<DisasterDefinition>();
 
     [Tooltip("Off: a turn is one completed walk (one click). On: every tile the player steps onto counts as a turn.")]
     [SerializeField] private bool countEveryTileStep = false;
 
+    [Header("Random Pool")]
+    [Tooltip("The shortest wait, in turns, before the next random disaster.")]
+    [Min(1)] [SerializeField] private int poolGapMin = 3;
+
+    [Tooltip("The longest wait, in turns, before the next random disaster. Make it the same as the shortest for a fixed rhythm.")]
+    [Min(1)] [SerializeField] private int poolGapMax = 5;
+
+    [Tooltip("On: the warning names the disaster that is coming next. Off: it just says 'A disaster'.")]
+    [SerializeField] private bool showNextDisaster = true;
+
+    [Header("Game Over")]
+    [Tooltip("On: running out of resources ends the run and you have to Restart.")]
+    [SerializeField] private bool gameOverWhenNoResources = true;
+
+    [Tooltip("On: only a disaster that leaves you with nothing ends the run. Off: ANY way of reaching zero resources does (for example spending them all on crafting).")]
+    [SerializeField] private bool onlyFromDisasters = true;
+
+    [Header("Display")]
     [Tooltip("Shows the turn number and a countdown to the next disaster at the top of the screen.")]
     [SerializeField] private bool showHud = true;
 
@@ -36,10 +61,20 @@ public class DisasterManager : MonoBehaviour
 
     private readonly List<ActiveEffect> active = new List<ActiveEffect>();
 
+    // The turn each late-starting disaster first became possible (used to count its schedule from then).
+    private readonly Dictionary<DisasterDefinition, int> activeSince = new Dictionary<DisasterDefinition, int>();
+
+    // The random pool: when the next pool disaster strikes, and which one it will be.
+    private int nextPoolTurn;
+    private DisasterDefinition nextPool;
+
+    private bool hadResources; // you can only "run out" after having had some
+
     void Awake()
     {
         if (player == null) player = FindObjectOfType<PlayerController>();
         if (grid == null) grid = FindObjectOfType<GridManager>();
+        ScheduleNextPool();
     }
 
     void OnEnable()
@@ -48,6 +83,7 @@ public class DisasterManager : MonoBehaviour
         player.StepTaken += OnStepTaken;
         player.MoveFinished += OnMoveFinished;
         player.WasReset += ResetDisasters;
+        player.ResourcesChanged += OnResourcesChanged;
     }
 
     void OnDisable()
@@ -56,6 +92,7 @@ public class DisasterManager : MonoBehaviour
         player.StepTaken -= OnStepTaken;
         player.MoveFinished -= OnMoveFinished;
         player.WasReset -= ResetDisasters;
+        player.ResourcesChanged -= OnResourcesChanged;
     }
 
     // ---------- Turns ----------
@@ -72,22 +109,146 @@ public class DisasterManager : MonoBehaviour
 
     void EndTurn()
     {
-        if (player == null || player.HasWon) return; // reaching the goal beats any disaster
+        if (player == null || player.HasWon || player.GameOver) return; // the run is over
 
         Turn++;
+        bool unlocked = UpdateActivation();
+
+        // 1. Disasters on their own fixed schedule.
         foreach (DisasterDefinition disaster in disasters)
-            if (disaster != null && disaster.StrikesOnTurn(Turn)) Strike(disaster);
+        {
+            if (disaster == null || disaster.timing != DisasterTiming.OwnSchedule || !IsActive(disaster)) continue;
+
+            if (disaster.StrikesOnTurn(TurnsActive(disaster)))
+            {
+                Strike(disaster);
+                if (player.GameOver) return;
+            }
+        }
+
+        // 2. The random pool.
+        if (Turn >= nextPoolTurn)
+        {
+            DisasterDefinition pick = IsPoolEligible(nextPool) ? nextPool : PickFromPool();
+            if (pick != null) Strike(pick);
+            ScheduleNextPool();
+        }
+        else if (unlocked || !IsPoolEligible(nextPool))
+        {
+            // Something new became possible (the Meteor after the Cellar, say), so it can be the next one.
+            nextPool = PickFromPool();
+        }
     }
+
+    // ---------- Which disasters are possible right now ----------
+
+    bool IsActive(DisasterDefinition disaster)
+    {
+        switch (disaster.activeFrom)
+        {
+            case DisasterStage.AfterAllDomesVisited:
+                return player != null && grid != null && player.GoalsVisited >= grid.Goals.Count;
+            case DisasterStage.AfterCellarVisited:
+                return player != null && player.CellarFound;
+            default:
+                return true;
+        }
+    }
+
+    // Notes the turn each late-starting disaster first became possible. Returns true if one just did.
+    bool UpdateActivation()
+    {
+        bool newlyActive = false;
+        foreach (DisasterDefinition disaster in disasters)
+        {
+            if (disaster == null || disaster.activeFrom == DisasterStage.FromStart) continue;
+
+            if (IsActive(disaster) && !activeSince.ContainsKey(disaster))
+            {
+                activeSince[disaster] = Turn;
+                newlyActive = true;
+            }
+        }
+        return newlyActive;
+    }
+
+    // How many turns it has been possible for (0 on the turn it unlocks).
+    int TurnsActive(DisasterDefinition disaster)
+    {
+        if (disaster.activeFrom == DisasterStage.FromStart) return Turn;
+        return activeSince.TryGetValue(disaster, out int since) ? Turn - since : 0;
+    }
+
+    // ---------- The random pool ----------
+
+    bool IsPoolEligible(DisasterDefinition disaster)
+    {
+        return disaster != null && disaster.timing == DisasterTiming.RandomPool && disaster.weight > 0f && IsActive(disaster);
+    }
+
+    // A weighted random pick among the disasters that can happen right now. Null if there are none.
+    DisasterDefinition PickFromPool()
+    {
+        float total = 0f;
+        foreach (DisasterDefinition disaster in disasters)
+            if (IsPoolEligible(disaster)) total += disaster.weight;
+
+        if (total <= 0f) return null;
+
+        float roll = UnityEngine.Random.value * total;
+        DisasterDefinition last = null;
+        foreach (DisasterDefinition disaster in disasters)
+        {
+            if (!IsPoolEligible(disaster)) continue;
+            last = disaster;
+            roll -= disaster.weight;
+            if (roll <= 0f) return disaster;
+        }
+        return last;
+    }
+
+    void ScheduleNextPool()
+    {
+        int low = Mathf.Max(1, Mathf.Min(poolGapMin, poolGapMax));
+        int high = Mathf.Max(low, Mathf.Max(poolGapMin, poolGapMax));
+
+        nextPoolTurn = Turn + UnityEngine.Random.Range(low, high + 1);
+        nextPool = PickFromPool();
+    }
+
+    // ---------- Striking ----------
 
     void Strike(DisasterDefinition disaster)
     {
+        int before = player.TotalResources;
         string summary = disaster.Trigger(new DisasterContext { player = player, grid = grid, turn = Turn });
+        int after = player.TotalResources;
 
         active.Add(new ActiveEffect { disaster = disaster, summary = summary, startTime = Time.unscaledTime });
         if (disaster.visuals.cameraShake > 0f) CameraThump.Thump(disaster.visuals.cameraShake, 0.8f);
 
         Debug.Log("Disaster: " + disaster.displayName + " struck on turn " + Turn + ". " + summary);
         DisasterStruck?.Invoke(disaster, summary);
+
+        // Wiped out: you had resources and now you have none.
+        if (gameOverWhenNoResources && before > 0 && after == 0)
+            player.FailRun("The " + disaster.displayName + " left you with nothing.");
+    }
+
+    // Only used when "Only From Disasters" is off: any way of hitting zero ends the run.
+    void OnResourcesChanged()
+    {
+        if (player == null) return;
+
+        int total = player.TotalResources;
+        if (total > 0)
+        {
+            hadResources = true;
+        }
+        else if (hadResources && gameOverWhenNoResources && !onlyFromDisasters && !player.GameOver && !player.HasWon)
+        {
+            player.FailRun("You ran out of resources.");
+        }
     }
 
     // Back to turn 0 with nothing on screen (used by Restart).
@@ -95,6 +256,9 @@ public class DisasterManager : MonoBehaviour
     {
         Turn = 0;
         active.Clear();
+        activeSince.Clear();
+        hadResources = false;
+        ScheduleNextPool();
     }
 
     // ---------- Drawing (quick on-screen GUI, no Canvas needed) ----------
@@ -104,7 +268,7 @@ public class DisasterManager : MonoBehaviour
         GUI.depth = -100; // draw on top of the cards and everything else
 
         DrawEffects();
-        if (showHud && player != null && !player.HasWon) DrawHud();
+        if (showHud && player != null && !player.HasWon && !player.GameOver) DrawHud();
 
         GUI.color = Color.white;
     }
@@ -124,22 +288,36 @@ public class DisasterManager : MonoBehaviour
         y += 24f;
 
         int shown = 0;
-        foreach (DisasterDefinition disaster in disasters)
+
+        // The next random disaster.
+        if (IsPoolEligible(nextPool))
         {
-            if (disaster == null || shown >= 3) continue;
-
-            int turnsLeft = disaster.TurnsUntilNext(Turn);
-            bool imminent = turnsLeft <= 1;
-
-            style.normal.textColor = imminent ? new Color(1f, 0.6f, 0.3f) : new Color(0.85f, 0.92f, 1f);
-            string text = imminent
-                ? disaster.displayName + " strikes after your next move!"
-                : disaster.displayName + " in " + turnsLeft + " turns";
-            GUI.Label(new Rect(0f, y, Screen.width, 22f), text, style);
-
-            y += 22f;
+            string name = showNextDisaster ? nextPool.displayName : "A disaster";
+            DrawCountdown(style, ref y, name, Mathf.Max(1, nextPoolTurn - Turn));
             shown++;
         }
+
+        // Disasters on their own schedule.
+        foreach (DisasterDefinition disaster in disasters)
+        {
+            if (shown >= 3) break;
+            if (disaster == null || disaster.timing != DisasterTiming.OwnSchedule || !IsActive(disaster)) continue;
+
+            DrawCountdown(style, ref y, disaster.displayName, disaster.TurnsUntilNext(TurnsActive(disaster)));
+            shown++;
+        }
+    }
+
+    void DrawCountdown(GUIStyle style, ref float y, string name, int turnsLeft)
+    {
+        bool imminent = turnsLeft <= 1;
+        style.normal.textColor = imminent ? new Color(1f, 0.6f, 0.3f) : new Color(0.85f, 0.92f, 1f);
+
+        string text = imminent
+            ? name + " strikes after your next move!"
+            : name + " in " + turnsLeft + " turns";
+        GUI.Label(new Rect(0f, y, Screen.width, 22f), text, style);
+        y += 22f;
     }
 
     void DrawEffects()
@@ -170,7 +348,7 @@ public class DisasterManager : MonoBehaviour
         }
     }
 
-    // Falling snow, rain, ash... Each particle's position is worked out from the time, so nothing needs to be stored.
+    // Falling snow, rain, embers... Each particle's position is worked out from the time, so nothing needs to be stored.
     void DrawParticles(DisasterVisuals visuals, float t, float envelope)
     {
         float w = Screen.width;
